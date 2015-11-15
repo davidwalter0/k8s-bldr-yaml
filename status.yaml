@@ -1,0 +1,31 @@
+apiVersion: v0.1
+kind: test
+spec:
+- name: ok
+  protocol: cmd
+  recv:
+    ack:
+      stdout: |
+        ok
+    nak: {}
+  send:
+    spec:
+      uri: file:///bin/bash
+      arg:
+      - -c
+      - |
+        echo ok
+- name: hello
+  protocol: cmd
+  recv:
+    ack:
+      stdout: |
+        Hello, World!
+    nak: {}
+  send:
+    spec:
+      uri: file:///bin/bash
+      arg:
+      - -c
+      - |
+        echo "Hello, World!"

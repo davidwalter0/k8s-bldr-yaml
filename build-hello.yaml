@@ -1,0 +1,110 @@
+apiVersion: v0.1
+kind: test
+spec:
+- name: build-init
+  protocol: cmd
+  recv:
+    ack:
+      stdout: |
+        { "reply": "ok" }
+    nak: {}
+  send:
+    spec:
+      uri: file:///bin/bash
+      arg:
+      - -c
+      - |
+        echo starting process in ${HOSTNAME}
+- name: build-hello-exec
+  protocol: cmd
+  recv:
+    ack:
+      stdout: |
+        { "reply": "ok" }
+    nak: {}
+  send:
+    spec:
+      uri: file:///bin/bash
+      arg:
+      - -c
+      - |
+        yum -y install golang &> /dev/null
+        mkdir -p /var/build
+        dir=$(mktemp --directory /var/build/build-00-XXXX)
+        function clean
+        {
+           echo would clean ${dir}
+           echo rm -rf ${dir}
+        }
+
+        trap clean exit term int
+        
+        echo ${dir}
+        ls -al ${dir}
+        cd ${dir}
+        docker rmi hello
+        mkdir -p ${dir}/hello
+        ########################
+        cat > ${dir}/hello/main.go <<EOF
+        package main
+
+        import (
+          "fmt"
+          "net/http"
+        )
+        var BUILD string
+
+        func handler(w http.ResponseWriter, r *http.Request) {
+          fmt.Fprintln(w, "Hello World from Go in minimal Docker container go compiled at: ", BUILD)
+        }
+
+        func main() {
+          http.HandleFunc("/", handler)
+
+          fmt.Println("Started, serving at 8001 compiled at: ", BUILD)
+          err := http.ListenAndServe(":8001", nil)
+          if err != nil {
+            panic("ListenAndServe: " + err.Error())
+          }
+        }
+        EOF
+        cd ${dir}/hello
+        go build -v -tags netgo -ldflags "-s -w -X main.BUILD $(date -u +%Y.%m.%d.%H.%M.%S)"
+        #go build -v -tags netgo -ldflags "-s -w -X main.BUILD $(date -u +.%Y%m%d.%H%M%S)"
+        #docker run --rm -v "${PWD}":/usr/src/hello -w /usr/src/hello golang:1.5 \
+        #  go build -v "-X main.BUILD=$(date -u +.%Y%m%d.%H%M%S)" -tags netgo -ldflags "-s -w"
+        ########################
+        echo Build status [$?] of hello for ${HOSTNAME}
+        echo Build docker container in ${dir}/hello
+        cat > ${dir}/hello/Dockerfile <<EOF
+        FROM scratch
+        copy hello /hello
+        ENTRYPOINT [ "/hello" ]
+        EOF
+        docker rmi hello-from-go
+        docker build --force-rm --rm --tag hello-from-go .
+        rm -rf ${dir}
+
+- name: build-hello-validate
+  protocol: cmd
+  recv:
+    ack:
+      stdout: |
+        { "reply": "ok" }
+    nak: {}
+  send:
+    spec:
+      uri: file:///bin/bash
+      arg:
+      - -c
+      - |
+        cd /tmp
+        echo about to start container hello-from-go
+        docker run --name=hello-from-go --rm hello-from-go
+        echo started in the background to start container hello-from-go ${pid}
+        for ((c=0; c<10; c++)); do if curl localhost:8001 ; then break; else sleep 1; done
+        echo "Trying curl localhost:8001 got[$(curl localhost:8001)]"
+        docker logs hello-from-go
+        docker stop hello-from-go
+        docker rm -v hello-from-go
+        echo done
